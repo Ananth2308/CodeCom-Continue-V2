@@ -1000,4 +1000,4 @@ Install all with: `pip install -r requirements.txt`
 
 ## License
 
-This project is not yet licensed. Contact the repository owner for usage terms.
+This project is not yet licensed. Contact me for usage terms.
