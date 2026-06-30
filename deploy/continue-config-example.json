@@ -1,0 +1,19 @@
+{
+  "$schema": "https://continue.dev/config-schema.json",
+  "models": [
+    {
+      "title": "Dev Agent",
+      "provider": "openai",
+      "model": "dev-agent",
+      "apiBase": "http://YOUR_EC2_IP:8080/v1",
+      "apiKey": "not-needed"
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "vLLM Direct (for autocomplete)",
+    "provider": "openai",
+    "model": "YOUR_MODEL_NAME",
+    "apiBase": "http://YOUR_EC2_IP:8000/v1",
+    "apiKey": "EMPTY"
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Dev Agent Proxy Server
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/dev-agent-proxy
+Environment=PATH=/home/ubuntu/dev-agent-proxy/.venv/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/home/ubuntu/dev-agent-proxy/.env
+ExecStart=/home/ubuntu/dev-agent-proxy/.venv/bin/python run.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
