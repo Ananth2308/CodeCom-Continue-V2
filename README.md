@@ -618,67 +618,147 @@ Both validation agents:
 
 ## vLLM Backend Setup
 
-The proxy requires a vLLM server running an instruction-tuned model. Below is the exact command used to host the model for this project:
+The proxy requires a vLLM server running any instruction-tuned model. You can bring your own model — any HuggingFace model that supports chat completion will work.
 
-### Production Command
+### Generic Command Template
 
 ```bash
 # Install vLLM (requires NVIDIA GPU with CUDA)
 pip install vllm
 
-# Serve Qwen3 Coder 30B (AWQ 4-bit quantized, 4x GPU)
+# Serve your model
 unset VLLM_ATTENTION_BACKEND && python -m vllm.entrypoints.openai.api_server \
-  --model cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit \
-  --served-model-name qwen3-coder-30b-awq4 \
+  --model <YOUR_HUGGINGFACE_MODEL_ID> \
+  --served-model-name <YOUR_MODEL_NAME> \
   --host 0.0.0.0 \
   --port 8080 \
   --dtype auto \
-  --tensor-parallel-size 4 \
+  --tensor-parallel-size <NUM_GPUS> \
   --pipeline-parallel-size 1 \
   --gpu-memory-utilization 0.90 \
   --max-num-seqs 16 \
   --enforce-eager \
   --enable-auto-tool-choice \
-  --tool-call-parser hermes
+  --tool-call-parser <PARSER_FORMAT>
 
 # Verify it's running
 curl http://localhost:8080/v1/models
 ```
 
-### Command Breakdown
+Replace the placeholders:
 
-| Flag | Value | Purpose |
+| Placeholder | What to put | Example |
 |---|---|---|
-| `--model` | `cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit` | HuggingFace model ID (AWQ 4-bit quantized) |
-| `--served-model-name` | `qwen3-coder-30b-awq4` | Name exposed via the API (must match `AGENT_VLLM_MODEL` in `.env`) |
-| `--host` | `0.0.0.0` | Listen on all interfaces |
-| `--port` | `8080` | Port for the OpenAI-compatible API |
-| `--dtype` | `auto` | Auto-detect dtype from model config |
-| `--tensor-parallel-size` | `4` | Shard model across 4 GPUs |
-| `--pipeline-parallel-size` | `1` | No pipeline parallelism |
-| `--gpu-memory-utilization` | `0.90` | Use 90% of GPU memory for KV cache |
-| `--max-num-seqs` | `16` | Max concurrent sequences |
-| `--enforce-eager` | — | Disable CUDA graph capture (more stable, slightly slower) |
-| `--enable-auto-tool-choice` | — | Enable native function/tool calling support |
-| `--tool-call-parser` | `hermes` | Use Hermes-style tool call parsing format |
+| `<YOUR_HUGGINGFACE_MODEL_ID>` | HuggingFace model repo or local path | `Qwen/Qwen2.5-Coder-32B-Instruct`, `meta-llama/Llama-3.1-70B-Instruct`, `/models/my-local-model` |
+| `<YOUR_MODEL_NAME>` | Friendly name exposed via API (must match `AGENT_VLLM_MODEL` in `.env`) | `qwen-coder`, `llama-70b`, `my-model` |
+| `<NUM_GPUS>` | Number of GPUs to shard across | `1`, `2`, `4` |
+| `<PARSER_FORMAT>` | Tool call parser matching your model's format | `hermes`, `llama3_json`, `mistral`, `jamba` |
+
+### Example Configurations
+
+**Qwen3 Coder 30B (AWQ 4-bit, 4 GPUs):**
+```bash
+unset VLLM_ATTENTION_BACKEND && python -m vllm.entrypoints.openai.api_server \
+  --model cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit \
+  --served-model-name qwen3-coder-30b-awq4 \
+  --host 0.0.0.0 --port 8080 --dtype auto \
+  --tensor-parallel-size 4 --gpu-memory-utilization 0.90 \
+  --max-num-seqs 16 --enforce-eager \
+  --enable-auto-tool-choice --tool-call-parser hermes
+```
+
+**Llama 3.1 70B Instruct (2 GPUs):**
+```bash
+python -m vllm.entrypoints.openai.api_server \
+  --model meta-llama/Llama-3.1-70B-Instruct \
+  --served-model-name llama-70b \
+  --host 0.0.0.0 --port 8080 --dtype auto \
+  --tensor-parallel-size 2 --gpu-memory-utilization 0.90 \
+  --max-num-seqs 8 --enforce-eager \
+  --enable-auto-tool-choice --tool-call-parser llama3_json
+```
+
+**Qwen2.5 Coder 32B (Single GPU, GPTQ 4-bit):**
+```bash
+python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-Coder-32B-Instruct-GPTQ-Int4 \
+  --served-model-name qwen-coder-32b \
+  --host 0.0.0.0 --port 8080 --dtype auto \
+  --tensor-parallel-size 1 --gpu-memory-utilization 0.95 \
+  --max-num-seqs 8 --enforce-eager \
+  --enable-auto-tool-choice --tool-call-parser hermes
+```
+
+**DeepSeek Coder V2 (2 GPUs):**
+```bash
+python -m vllm.entrypoints.openai.api_server \
+  --model deepseek-ai/DeepSeek-Coder-V2-Instruct \
+  --served-model-name deepseek-coder \
+  --host 0.0.0.0 --port 8080 --dtype auto \
+  --tensor-parallel-size 2 --gpu-memory-utilization 0.90 \
+  --max-num-seqs 8 --enforce-eager \
+  --enable-auto-tool-choice --tool-call-parser hermes
+```
+
+### Tool Call Parser Options
+
+The `--tool-call-parser` flag must match your model's tool calling format. Common options:
+
+| Parser | Models That Use It |
+|---|---|
+| `hermes` | Qwen, Qwen2.5, Qwen3, NousResearch Hermes models |
+| `llama3_json` | Llama 3.1, Llama 3.2, Llama 3.3 |
+| `mistral` | Mistral, Mixtral |
+| `jamba` | AI21 Jamba models |
+| `internlm` | InternLM models |
+
+If your model doesn't support native tool calling, or you're unsure which parser to use, **you can omit `--enable-auto-tool-choice` and `--tool-call-parser` entirely** — the proxy will automatically fall back to prompt-based tool calling (parses tool calls from the model's text output).
+
+### Flag Reference
+
+| Flag | Purpose |
+|---|---|
+| `--model` | HuggingFace model ID or local path to model weights |
+| `--served-model-name` | Name exposed via API — **must match** `AGENT_VLLM_MODEL` in your `.env` |
+| `--host` | Network interface to bind (use `0.0.0.0` for all interfaces) |
+| `--port` | Port for the OpenAI-compatible API |
+| `--dtype` | Data type (`auto`, `float16`, `bfloat16`) — use `auto` unless you have a reason |
+| `--tensor-parallel-size` | Number of GPUs to shard the model across |
+| `--pipeline-parallel-size` | Pipeline parallelism stages (usually `1`) |
+| `--gpu-memory-utilization` | Fraction of GPU memory for KV cache (`0.85`–`0.95` recommended) |
+| `--max-num-seqs` | Max concurrent requests (lower = less memory, higher = more throughput) |
+| `--enforce-eager` | Disable CUDA graph capture (more stable, slightly slower) |
+| `--enable-auto-tool-choice` | Enable native function/tool calling support |
+| `--tool-call-parser` | Format for parsing tool calls from the model |
+| `--quantization` | Explicit quantization method (`awq`, `gptq`, `squeezellm`) — usually auto-detected |
+| `--max-model-len` | Max context length (defaults to model's config, lower to save memory) |
+| `--api-key` | Require a bearer token for authentication |
 
 ### Important Notes
 
-- **`unset VLLM_ATTENTION_BACKEND`** is required to avoid conflicts with custom attention backends that may be set in the environment
-- **`--enable-auto-tool-choice` + `--tool-call-parser hermes`** enables native OpenAI-compatible tool calling — this is what allows the proxy to send `tools` in the request and receive structured `tool_calls` in the response
-- **4 GPUs required** due to `--tensor-parallel-size 4` — adjust based on your hardware (e.g., use `2` for 2x GPUs)
-- **`--enforce-eager`** trades some throughput for stability — remove it if you want CUDA graph optimization but may encounter OOM issues
+- **`unset VLLM_ATTENTION_BACKEND`** — recommended to avoid conflicts with custom attention backends set in the environment
+- **`--enable-auto-tool-choice` + `--tool-call-parser`** enables native OpenAI-compatible tool calling. Without these, the proxy still works via prompt-based fallback.
+- **`--enforce-eager`** trades some throughput for stability — remove it for production with well-tested models
+- **`AGENT_VLLM_MODEL` in `.env` must exactly match `--served-model-name`** — this is how the proxy tells vLLM which model to use
 - The proxy overrides `temperature=0.1` and `max_tokens=4096` regardless of client settings
-- If native tool calling fails for any reason, the proxy auto-falls back to prompt-based tool calling (parses tool calls from text output)
-- Ensure your `AGENT_VLLM_BASE_URL` in `.env` matches the host:port where vLLM is running (e.g., `http://YOUR_EC2_IP:8080/v1`)
+- Ensure your `AGENT_VLLM_BASE_URL` in `.env` points to `http://<VLLM_HOST>:<VLLM_PORT>/v1`
 
-### Hardware Requirements
+### Hardware Guidelines
 
-For `Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit` with the above config:
-- **Minimum**: 4x NVIDIA GPUs with 16GB+ VRAM each (e.g., 4x T4, 4x A10G)
-- **Recommended**: 4x A10G (24GB) or 2x A100 (80GB, reduce tensor-parallel-size to 2)
-- **RAM**: 64GB+ system memory
-- **Storage**: ~20GB for model weights
+| Model Size | Quantization | Min GPUs | Recommended GPUs |
+|---|---|---|---|
+| 7B–8B | None (FP16) | 1x 16GB (T4/A10G) | 1x 24GB (A10G/L4) |
+| 7B–8B | AWQ/GPTQ 4-bit | 1x 8GB (RTX 3070) | 1x 16GB (T4) |
+| 13B–14B | None (FP16) | 1x 24GB (A10G) | 1x 40GB (A100-40G) |
+| 13B–14B | AWQ/GPTQ 4-bit | 1x 16GB (T4) | 1x 24GB (A10G) |
+| 30B–34B | AWQ/GPTQ 4-bit | 2x 16GB (2x T4) | 4x 24GB (4x A10G) |
+| 70B | None (FP16) | 4x 40GB (4x A100) | 4x 80GB (4x A100-80G) |
+| 70B | AWQ/GPTQ 4-bit | 2x 40GB (2x A100) | 4x 24GB (4x A10G) |
+
+General requirements:
+- **RAM**: 32GB+ system memory (64GB+ for 70B models)
+- **Storage**: 2x model size on disk (for download + conversion)
+- **CUDA**: 11.8+ (12.1+ recommended)
 
 ---
 
