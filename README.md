@@ -618,35 +618,67 @@ Both validation agents:
 
 ## vLLM Backend Setup
 
-The proxy requires a vLLM server running an instruction-tuned model. Here's a quick setup:
+The proxy requires a vLLM server running an instruction-tuned model. Below is the exact command used to host the model for this project:
+
+### Production Command
 
 ```bash
 # Install vLLM (requires NVIDIA GPU with CUDA)
 pip install vllm
 
-# Serve a model (example: Qwen3 Coder 30B AWQ quantized)
-python -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen3-Coder-30B-AWQ \
-  --quantization awq \
-  --port 8000 \
-  --api-key "your-api-key" \
-  --max-model-len 32768 \
-  --gpu-memory-utilization 0.95
+# Serve Qwen3 Coder 30B (AWQ 4-bit quantized, 4x GPU)
+unset VLLM_ATTENTION_BACKEND && python -m vllm.entrypoints.openai.api_server \
+  --model cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit \
+  --served-model-name qwen3-coder-30b-awq4 \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --dtype auto \
+  --tensor-parallel-size 4 \
+  --pipeline-parallel-size 1 \
+  --gpu-memory-utilization 0.90 \
+  --max-num-seqs 16 \
+  --enforce-eager \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes
 
 # Verify it's running
-curl http://localhost:8000/v1/models
+curl http://localhost:8080/v1/models
 ```
 
-**Recommended models** (tested with this proxy):
-- `Qwen/Qwen3-Coder-30B-AWQ` — Best balance of speed and quality
-- `Qwen/Qwen2.5-Coder-32B-Instruct` — Good native tool calling
-- `deepseek-ai/DeepSeek-Coder-V2-Instruct` — Strong coding ability
-- Any instruction-tuned model with chat template support
+### Command Breakdown
 
-**Notes:**
+| Flag | Value | Purpose |
+|---|---|---|
+| `--model` | `cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit` | HuggingFace model ID (AWQ 4-bit quantized) |
+| `--served-model-name` | `qwen3-coder-30b-awq4` | Name exposed via the API (must match `AGENT_VLLM_MODEL` in `.env`) |
+| `--host` | `0.0.0.0` | Listen on all interfaces |
+| `--port` | `8080` | Port for the OpenAI-compatible API |
+| `--dtype` | `auto` | Auto-detect dtype from model config |
+| `--tensor-parallel-size` | `4` | Shard model across 4 GPUs |
+| `--pipeline-parallel-size` | `1` | No pipeline parallelism |
+| `--gpu-memory-utilization` | `0.90` | Use 90% of GPU memory for KV cache |
+| `--max-num-seqs` | `16` | Max concurrent sequences |
+| `--enforce-eager` | — | Disable CUDA graph capture (more stable, slightly slower) |
+| `--enable-auto-tool-choice` | — | Enable native function/tool calling support |
+| `--tool-call-parser` | `hermes` | Use Hermes-style tool call parsing format |
+
+### Important Notes
+
+- **`unset VLLM_ATTENTION_BACKEND`** is required to avoid conflicts with custom attention backends that may be set in the environment
+- **`--enable-auto-tool-choice` + `--tool-call-parser hermes`** enables native OpenAI-compatible tool calling — this is what allows the proxy to send `tools` in the request and receive structured `tool_calls` in the response
+- **4 GPUs required** due to `--tensor-parallel-size 4` — adjust based on your hardware (e.g., use `2` for 2x GPUs)
+- **`--enforce-eager`** trades some throughput for stability — remove it if you want CUDA graph optimization but may encounter OOM issues
 - The proxy overrides `temperature=0.1` and `max_tokens=4096` regardless of client settings
-- If your model doesn't support native function calling, the proxy auto-falls back to prompt mode
-- Ensure your vLLM server allows the bearer token you configure in `AGENT_VLLM_API_KEY`
+- If native tool calling fails for any reason, the proxy auto-falls back to prompt-based tool calling (parses tool calls from text output)
+- Ensure your `AGENT_VLLM_BASE_URL` in `.env` matches the host:port where vLLM is running (e.g., `http://YOUR_EC2_IP:8080/v1`)
+
+### Hardware Requirements
+
+For `Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit` with the above config:
+- **Minimum**: 4x NVIDIA GPUs with 16GB+ VRAM each (e.g., 4x T4, 4x A10G)
+- **Recommended**: 4x A10G (24GB) or 2x A100 (80GB, reduce tensor-parallel-size to 2)
+- **RAM**: 64GB+ system memory
+- **Storage**: ~20GB for model weights
 
 ---
 
